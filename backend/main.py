@@ -193,7 +193,9 @@ async def analyze_contract(request: dict):
                     **Expected Output:** Return ONLY a JSON object structured as follows:
                     {
                         "Score": <number between 0-100>,
+                        "Score_Reasoning": "<brief explanation for the score>",
                         "Compliance_Level": "<string: High|Medium|Low>",
+                        "Compliance_Reasoning": "<brief explanation for the compliance level>",
                         "Strengths": ["<string>", ...],
                         "Improvement_Areas": ["<string>", ...],
                         "Legal_Risks": ["<string>", ...],
@@ -204,7 +206,9 @@ async def analyze_contract(request: dict):
                     **Example:**
                     {
                         "Score": 85,
+                        "Score_Reasoning": "The contract is highly compliant with legal and regulatory requirements.",
                         "Compliance_Level": "High",
+                        "Compliance_Reasoning": "The contract meets all legal and regulatory requirements.",
                         "Strengths": ["Well-defined termination clause", "Clear dispute resolution process"],
                         "Improvement_Areas": ["Ambiguity in confidentiality clause", "Missing data protection provisions"],
                         "Legal_Risks": ["Potential exposure to jurisdictional disputes", "Insufficient coverage for force majeure events"],
@@ -239,7 +243,9 @@ async def analyze_contract(request: dict):
                 return JSONResponse(
                     content={
                         "Score": 0,
+                        "Score_Reasoning": "Analysis failed - JSON parsing error",
                         "Compliance_Level": "Error",
+                        "Compliance_Reasoning": "Analysis failed - JSON parsing error",
                         "Strengths": [],
                         "Improvement_Areas": ["Could not parse analysis results"],
                         "Legal_Risks": ["Analysis failed - JSON parsing error"],
@@ -254,7 +260,9 @@ async def analyze_contract(request: dict):
             return JSONResponse(
                 content={
                     "Score": 0,
+                    "Score_Reasoning": "API error occurred",
                     "Compliance_Level": "Error",
+                    "Compliance_Reasoning": "API error occurred",
                     "Strengths": [],
                     "Improvement_Areas": ["API error occurred"],
                     "Legal_Risks": ["Analysis incomplete"],
@@ -269,7 +277,9 @@ async def analyze_contract(request: dict):
         return JSONResponse(
             content={
                 "Score": 0,
+                "Score_Reasoning": "System error occurred",
                 "Compliance_Level": "Error",
+                "Compliance_Reasoning": "System error occurred",
                 "Strengths": [],
                 "Improvement_Areas": ["System error occurred"],
                 "Legal_Risks": ["Analysis incomplete"],
