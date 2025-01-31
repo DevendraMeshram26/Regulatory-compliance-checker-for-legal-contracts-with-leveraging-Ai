@@ -65,22 +65,24 @@ def read_txt(file: BytesIO) -> str:
 # Function to use GroqCloud API for key clause extraction
 def analyze_key_clauses_with_groqcloud(text: str) -> dict:
     try:
-        # Define the messages and request body
+        # Truncate text to approximately 4000 tokens (roughly 16000 characters)
+        MAX_CHARS = 16000
+        if len(text) > MAX_CHARS:
+            text = text[:MAX_CHARS] + "... (truncated)"
+            logger.info(f"Text truncated to {MAX_CHARS} characters to meet token limits")
+
         messages = [
             {
                 "role": "system",
                 "content": """You are a contract analyzer. Extract the key clauses from the provided contract and return them in a JSON-like format, strictly adhering to this structure:
-
                 {
                   "clauses": [
                     {
                       "clause": "<clause title>",
-                      "description": "<clause description>"
+                      "description": "<brief description>"
                     }
                   ]
-                }
-
-                Ensure the output is valid JSON. Avoid unnecessary information or deviations from this structure."""
+                }"""
             },
             {
                 "role": "user",
@@ -92,7 +94,8 @@ def analyze_key_clauses_with_groqcloud(text: str) -> dict:
             "messages": messages,
             "model": "llama3-8b-8192",
             "temperature": 0,
-            "response_format": {"type": "json_object"}
+            "response_format": {"type": "json_object"},
+            "max_tokens": 2000  # Explicitly limit response tokens
         }
 
         headers = {
@@ -100,17 +103,14 @@ def analyze_key_clauses_with_groqcloud(text: str) -> dict:
             "Authorization": f"Bearer {GROQCLOUD_API_KEY}"
         }
 
-        # Make the API request
-        response = requests.post(GROQCLOUD_API_URL, data=json.dumps(data), headers=headers)
+        response = requests.post(GROQCLOUD_API_URL, json=data, headers=headers)
 
         if response.status_code != 200:
             return {"error": f"GroqCloud API Error: {response.status_code} - {response.text}"}
 
-        # Parse the response
         response_data = response.json()
         result_content = response_data["choices"][0]["message"]["content"]
 
-        # Try to load JSON
         try:
             result_json = json.loads(result_content)
             return result_json
@@ -125,32 +125,73 @@ def analyze_key_clauses_with_groqcloud(text: str) -> dict:
 @app.post("/uploadfile/")
 async def upload_file(file: UploadFile = File(...)):
     try:
-        # Read file content
+        # Read file content with size check
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB limit
         content = await file.read()
+        
+        if len(content) > MAX_FILE_SIZE:
+            return JSONResponse(
+                content={"error": "File size exceeds maximum limit of 10MB"},
+                status_code=400
+            )
+
         file_type = file.content_type
+        logger.info(f"Processing file: {file.filename} of type: {file_type}")
 
         # Extract text based on file type
-        if file_type == "application/pdf":
-            text = read_pdf(BytesIO(content))
-        elif file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            text = read_docx(BytesIO(content))
-        elif file_type == "text/plain":
-            text = read_txt(BytesIO(content))
-        else:
-            return JSONResponse(content={"error": "Unsupported file type"}, status_code=400)
+        try:
+            if file_type == "application/pdf":
+                text = read_pdf(BytesIO(content))
+            elif file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                text = read_docx(BytesIO(content))
+            elif file_type == "text/plain":
+                text = read_txt(BytesIO(content))
+            else:
+                return JSONResponse(
+                    content={"error": f"Unsupported file type: {file_type}"},
+                    status_code=400
+                )
 
-        # Analyze key clauses
-        analysis_result = analyze_key_clauses_with_groqcloud(text)
+            if not text.strip():
+                return JSONResponse(
+                    content={"error": "No text could be extracted from the file"},
+                    status_code=400
+                )
 
-        # Check for errors in analysis_result
-        if "error" in analysis_result:
-            return JSONResponse(content={"error": analysis_result["error"]}, status_code=500)
+            # Analyze key clauses
+            analysis_result = analyze_key_clauses_with_groqcloud(text)
 
-        # Return the analysis result as JSON
-        return {"clauses": analysis_result.get("clauses", []), "file_name": file.filename, "file_type": file_type}
+            # Check for errors in analysis_result
+            if "error" in analysis_result:
+                logger.error(f"Analysis error: {analysis_result['error']}")
+                return JSONResponse(
+                    content={"error": analysis_result["error"]},
+                    status_code=500
+                )
+
+            # Return the analysis result as JSON
+            return {
+                "clauses": analysis_result.get("clauses", []),
+                "file_name": file.filename,
+                "file_type": file_type
+            }
+
+        except Exception as e:
+            logger.error(f"Error processing file {file.filename}: {str(e)}")
+            return JSONResponse(
+                content={"error": f"Error processing file: {str(e)}"},
+                status_code=500
+            )
 
     except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        logger.error(f"Unexpected error in upload_file: {str(e)}")
+        return JSONResponse(
+            content={"error": "An unexpected error occurred while processing the file"},
+            status_code=500
+        )
+    finally:
+        # Ensure file is closed
+        await file.close()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -159,11 +200,17 @@ logger = logging.getLogger(__name__)
 @app.post("/analyze/")
 async def analyze_contract(request: dict):
     try:
-        # Extract contract text from request
+        # Extract contract text from request but limit the size
         contract_text = "\n".join([f"{clause['clause']}: {clause['description']}" 
                                    for clause in request.get("clauses", [])])
         
-        # Retrieve similar contract from ChromaDB
+        # Truncate text if it's too long (using 16k for main content)
+        MAX_TEXT_LENGTH = 16000
+        if len(contract_text) > MAX_TEXT_LENGTH:
+            contract_text = contract_text[:MAX_TEXT_LENGTH] + "... (truncated)"
+            logger.warning(f"Contract text truncated from {len(contract_text)} to {MAX_TEXT_LENGTH} characters")
+
+        # Get similar contract with smaller length limit
         try:
             collection = chroma_client.get_collection(name="DatasetEx")
             similar_results = collection.query(
@@ -171,12 +218,18 @@ async def analyze_contract(request: dict):
                 n_results=1
             )
             similar_contract = similar_results["documents"][0][0] if similar_results["documents"] else None
+            
+            # Truncate similar contract to smaller size
+            SIMILAR_MAX_LENGTH = 8000  # Smaller limit for similar contract
+            if similar_contract and len(similar_contract) > SIMILAR_MAX_LENGTH:
+                similar_contract = similar_contract[:SIMILAR_MAX_LENGTH] + "... (truncated)"
+            
             logger.info("Successfully retrieved similar contract from ChromaDB")
         except Exception as db_error:
             logger.error(f"ChromaDB error: {db_error}")
             similar_contract = None
-        
-        # Updated comprehensive system prompt for analysis
+
+        # Keep the original system prompt but with clearer formatting
         system_prompt = """You are a contract analysis AI. Your task is to analyze the given contract and provide a structured response in valid JSON format. 
 
                     **Objective:** Evaluate the contract for compliance, identify strengths and weaknesses, assess legal risks, and suggest actionable recommendations. Compare the contract with similar contracts and provide insights on alignment with industry standards.
@@ -218,17 +271,25 @@ async def analyze_contract(request: dict):
 
                     Please ensure the output is concise, detailed, and aligned with the structure above."""
 
-        # Make Groq API call
+
+        # Make Groq API call with both contracts but optimized structure
         try:
             groq_client = GroqClient(GROQCLOUD_API_KEY)
+            user_content = f"""Main Contract:
+{contract_text}
+
+Similar Contract:
+{similar_contract if similar_contract else 'No similar contract found'}"""
+
             response = groq_client.client.chat.completions.create(
                 model="llama3-8b-8192",
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Contract to analyze:\n{contract_text}\n\nSimilar contract:\n{similar_contract or 'No similar contract found'}"}
+                    {"role": "user", "content": user_content}
                 ],
                 temperature=0.1,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                max_tokens=2048
             )
             
             # Get the response content
