@@ -16,7 +16,7 @@ The **Regulatory Compliance Checker** is an AI-powered tool designed to analyze 
 - **Frontend:** Streamlit
 - **Database:** Chromadb
 - **AI/LLM:** Groq Cloud API
-- **Deployment:** CI/CD pipeline, Cloud hosting
+- **Deployment:** CI/CD pipeline
 
 ## Installation & Setup
 ### Prerequisites
@@ -61,7 +61,7 @@ The **Regulatory Compliance Checker** is an AI-powered tool designed to analyze 
 - Real-time compliance updates.
 
 ## Contributors
-- **Your Name** – AI & Full-Stack Developer
+- **Devendra Meshram** – AI & Full-Stack Developer
 - **Other Contributors**
 
 ## License
