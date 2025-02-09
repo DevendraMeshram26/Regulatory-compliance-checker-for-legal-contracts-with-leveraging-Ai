@@ -30,7 +30,7 @@ def analyze_key_clauses_with_groqcloud(text: str) -> dict:
 
         data = {
             "messages": messages,
-            "model": "llama-3.2-3b-preview",
+            "model": "llama3-8b-8192",
             "temperature": 0,
             "response_format": {"type": "json_object"}
         }
